@@ -1,0 +1,35 @@
+name: Update Handshake RSS
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Refresh every hour, at :17 to avoid GitHub's busiest cron minute.
+    - cron: "17 * * * *"
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Generate cleaned RSS feed
+        env:
+          HANDSHAKE_FEED_URL: ${{ secrets.HANDSHAKE_FEED_URL }}
+        run: python3 update_feed.py
+
+      - name: Commit feed if it changed
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs/handshake-feed-cleaned.rss
+          if git diff --cached --quiet; then
+            echo "No feed changes."
+          else
+            git commit -m "Update Handshake RSS feed"
+            git push
+          fi
