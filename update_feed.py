@@ -11,7 +11,8 @@ FEED_URL = os.environ.get("HANDSHAKE_FEED_URL")
 if not FEED_URL:
     raise SystemExit("Missing HANDSHAKE_FEED_URL secret.")
 
-OUT = Path("docs/handshake-feed-cleaned.rss")
+OUT_RSS = Path("docs/handshake-feed-cleaned.rss")
+OUT_XML = Path("docs/handshake-feed-cleaned.xml")
 
 def text(el, tag):
     return (el.findtext(tag) or "").strip()
@@ -227,12 +228,14 @@ def main():
         xml_bytes = response.read()
 
     cleaned = clean_feed(xml_bytes)
-    OUT.parent.mkdir(parents=True, exist_ok=True)
-    OUT.write_bytes(cleaned)
+    OUT_RSS.parent.mkdir(parents=True, exist_ok=True)
+    OUT_RSS.write_bytes(cleaned)
+    OUT_XML.write_bytes(cleaned)
 
     # Validate before publishing.
-    ET.parse(OUT)
-    print(f"Updated {OUT}")
+    ET.parse(OUT_RSS)
+    ET.parse(OUT_XML)
+    print(f"Updated {OUT_RSS} and {OUT_XML}")
 
 if __name__ == "__main__":
     main()
