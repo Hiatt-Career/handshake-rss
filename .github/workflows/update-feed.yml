@@ -2,6 +2,10 @@ name: Update Handshake RSS
 
 on:
   workflow_dispatch:
+  push:
+    paths:
+      - "update_feed.py"
+      - ".github/workflows/update-feed.yml"
   schedule:
     # Refresh every hour, at :17 to avoid GitHub's busiest cron minute.
     - cron: "17 * * * *"
