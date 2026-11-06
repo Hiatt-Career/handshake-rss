@@ -13,6 +13,8 @@ if not FEED_URL:
 
 OUT_RSS = Path("docs/handshake-feed-cleaned.rss")
 OUT_XML = Path("docs/handshake-feed-cleaned.xml")
+JOB_NS = "https://hiatt-career.github.io/handshake-rss/ns/job"
+ET.register_namespace("job", JOB_NS)
 
 def text(el, tag):
     return (el.findtext(tag) or "").strip()
@@ -303,6 +305,7 @@ def clean_feed(xml_bytes):
         desc = text(old, "description")
         employer = employer_from_description(desc)
         expires = expiration_from_description(desc)
+        source_pub_date = text(old, "pubDate")
         posted_date = posted_date_from_item(old)
         job_title = remove_employer_from_title(text(old, "title"), employer)
 
@@ -317,6 +320,15 @@ def clean_feed(xml_bytes):
 
         item = ET.SubElement(new_channel, "item")
         ET.SubElement(item, "title").text = clean_title
+
+        # Keep the standard RSS publication date for feed readers. Also expose
+        # simple MM/DD/YYYY job dates as namespaced item metadata.
+        if source_pub_date:
+            ET.SubElement(item, "pubDate").text = source_pub_date
+        if posted_date:
+            ET.SubElement(item, f"{{{JOB_NS}}}postDate").text = posted_date
+        if expires:
+            ET.SubElement(item, f"{{{JOB_NS}}}expirationDate").text = expires
 
         # The job title is already the item heading. Include only body fields
         # that have a value so the published entry has no empty lines.
