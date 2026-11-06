@@ -105,6 +105,130 @@ def expected_pay_from_description(desc):
             return normalize(m.group(1)).rstrip(" ,")
     return ""
 
+def posting_sentences(desc):
+    """Return readable sentences from the unstructured Handshake description."""
+    body = re.sub(
+        r"^\s*Employer:.*?\s+Expires:\s*\d{1,2}/\d{1,2}/\d{4}\s*",
+        "",
+        desc,
+        count=1,
+        flags=re.S | re.I,
+    )
+    # Handshake sometimes removes spaces between HTML blocks and sentences.
+    body = body.replace("**", " ")
+    body = re.sub(r"([.!?])(?=[A-Z])", r"\1 ", body)
+    body = re.sub(r"(?<=[a-z0-9])(?=(?:This|The|As a|We|Our)\s+[A-Z])", ". ", body)
+    body = re.sub(
+        r"(?<=[a-z0-9)])(?=(?:SUMMARY|GENERAL DESCRIPTION|JOB SUMMARY|"
+        r"RESPONSIBILITIES|IDEAL CANDIDATE|MINIMUM QUALIFICATIONS|"
+        r"WHAT [A-Z][A-Z ]+ OFFERS|PHYSICAL WORK ADDRESS):)",
+        ". ",
+        body,
+    )
+    body = re.sub(r"(:)(?=[A-Z])", r"\1 ", body)
+    sentences = []
+    for sentence in re.split(r"(?<=[.!?])\s+", body):
+        sentence = normalize(sentence).strip(" -•")
+        sentence = re.sub(
+            r"^(?:SUMMARY|GENERAL DESCRIPTION|JOB SUMMARY|RESPONSIBILITIES):\s*",
+            "",
+            sentence,
+            flags=re.I,
+        )
+        if not 45 <= len(sentence) <= 380:
+            continue
+        if re.search(
+            r"https?://|[\w.+-]+@[\w.-]+\.\w+|\bapply (?:today|now|here)\b|"
+            r"\bsend (?:your )?resume\b|"
+            r"\bequal opportunity\b|\bEOE\b|\bquestions? about the position\b",
+            sentence,
+            re.I,
+        ):
+            continue
+        sentences.append(sentence)
+    return sentences
+
+def select_summary(sentences, score, excluded=None, limit=2):
+    excluded = set(excluded or [])
+    ranked = []
+    for index, sentence in enumerate(sentences):
+        if sentence in excluded:
+            continue
+        value = score(sentence)
+        if value > 0:
+            ranked.append((value, -index, sentence))
+    selected = [entry[2] for entry in sorted(ranked, reverse=True)[:limit]]
+    selected.sort(key=sentences.index)
+    return selected
+
+def extract_summaries(desc, employer, job_title):
+    """Create short extractive employer and role summaries without inventing text."""
+    sentences = posting_sentences(desc)
+    employer_terms = [
+        term.lower()
+        for term in re.findall(r"[A-Za-z][A-Za-z&.'-]{2,}", employer)
+        if term.lower() not in {"the", "and", "inc", "llc", "corp", "company"}
+    ]
+    title_terms = [
+        term.lower()
+        for term in re.findall(r"[A-Za-z][A-Za-z'-]{3,}", job_title)
+        if term.lower() not in {"with", "from", "this", "that"}
+    ]
+
+    def employer_score(sentence):
+        lower = sentence.lower()
+        if not re.search(
+            r"\b(?:we are|is a|is an|company|organization|firm|our mission|"
+            r"founded|specializes|provides|delivers|serves|helps|works with|"
+            r"empowers?|unlocks?|offers)\b",
+            lower,
+        ):
+            return 0
+        score = 3
+        if any(term in lower for term in employer_terms):
+            score += 3
+        if re.search(r"\b(?:position|role|candidate|responsibilit|you will|you'll)\b", lower):
+            score -= 3
+        if re.search(
+            r"\b(?:required|requirements?|qualifications?|years? of experience|"
+            r"applicants?|license|complies?|must have|ideal candidate|"
+            r"experience in|skill in|responsibilities?:)\b",
+            lower,
+        ):
+            score -= 6
+        return score
+
+    employer_selected = select_summary(sentences, employer_score, limit=2)
+
+    def role_score(sentence):
+        lower = sentence.lower()
+        score = 0
+        if re.search(r"\b(?:job summary|responsible for|responsibilities include)\b", lower):
+            score += 6
+        elif re.search(
+            r"\b(?:position|role|responsibilit|seeking|looking for|"
+            r"you will|you'll|will be responsible|opportunity to)\b",
+            lower,
+        ):
+            score += 4
+        if any(term in lower for term in title_terms):
+            score += 2
+        if re.search(r"\b(?:salary|compensation|benefits|insurance|paid time off)\b", lower):
+            score -= 3
+        if re.search(
+            r"\b(?:required|requirements?|qualifications?|years? of experience|"
+            r"applicants?|license|must have|ideal candidate|selected for|"
+            r"requiring|may require|protective equipment|operational status)\b",
+            lower,
+        ):
+            score -= 6
+        return score
+
+    role_selected = select_summary(
+        sentences, role_score, excluded=employer_selected, limit=2
+    )
+    return " ".join(employer_selected), " ".join(role_selected)
+
 def remove_employer_from_title(title, employer):
     title = normalize(title)
     if employer:
@@ -187,6 +311,9 @@ def clean_feed(xml_bytes):
         position_type = position_type_from_text(clean_title, desc)
         location_type = location_type_from_description(desc)
         expected_pay = expected_pay_from_description(desc)
+        employer_summary, role_summary = extract_summaries(
+            desc, employer, clean_title
+        )
 
         item = ET.SubElement(new_channel, "item")
         ET.SubElement(item, "title").text = clean_title
@@ -195,6 +322,8 @@ def clean_feed(xml_bytes):
         # that have a value so the published entry has no empty lines.
         fields = [
             ("Employer", employer),
+            ("Employer summary", employer_summary),
+            ("Role summary", role_summary),
             ("Position type", position_type),
             ("Location type", location_type),
             ("Onsite location", loc),
@@ -202,9 +331,13 @@ def clean_feed(xml_bytes):
             ("Posted date", posted_date),
             ("Application close date", expires),
         ]
-        ET.SubElement(item, "description").text = "<br/>".join(
+        body = "<br/><br/>".join(
             f"{label}: {value}" for label, value in fields if value
         )
+        if body:
+            body += "<br/><br/>"
+        body += "Click the Apply button below to learn more"
+        ET.SubElement(item, "description").text = body
 
         # Preserve click-through without exposing the private source-feed token.
         link = text(old, "link")
