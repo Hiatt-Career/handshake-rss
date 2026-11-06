@@ -328,8 +328,8 @@ def clean_feed(xml_bytes):
             ("Location type", location_type),
             ("Onsite location", loc),
             ("Expected pay", expected_pay),
-            ("Job post date", posted_date),
-            ("Application close date", expires),
+            ("Post date", posted_date),
+            ("End date", expires),
         ]
         body = "<br/><br/>".join(
             f"{label}: {value}" for label, value in fields if value
