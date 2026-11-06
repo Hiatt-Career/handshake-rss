@@ -7,6 +7,7 @@ from email.utils import parsedate_to_datetime
 from pathlib import Path
 from xml.dom import minidom
 
+# Feed source is stored privately in the HANDSHAKE_FEED_URL Actions secret.
 FEED_URL = os.environ.get("HANDSHAKE_FEED_URL")
 if not FEED_URL:
     raise SystemExit("Missing HANDSHAKE_FEED_URL secret.")
